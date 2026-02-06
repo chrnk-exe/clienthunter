@@ -1,0 +1,9 @@
+# server
+/server/node_modules/
+/server/dist/
+
+# client
+/client/node_modules/
+/client/build/
+package-lock.json
+
