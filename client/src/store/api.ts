@@ -11,8 +11,10 @@ import type {
   UpdateUserBody,
 } from "./types";
 
+const baseUrl = import.meta.env.DEV ? "http://localhost:3000/api" : "/api";
+
 const baseQuery = fetchBaseQuery({
-  baseUrl: "/api",
+  baseUrl,
   credentials: "include",
 });
 

@@ -47,7 +47,7 @@ export async function getUserByNickname(nickname: string): Promise<User | null> 
 
 export async function createUser(nickname: string, password: string): Promise<User> {
   const passwordHash = await hashPassword(password);
-  const xssPath = `/${nickname}/xss`;
+  const xssPath = `/xss/${nickname}`;
   const csrfPath = `/${nickname}.html`;
   const token = crypto.randomUUID();
 

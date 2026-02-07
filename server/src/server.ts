@@ -61,11 +61,19 @@ app.all("/xss/:nickname", async (req, res) => {
     return;
   }
 
+  const forwardedFor = req.headers["x-forwarded-for"];
+  const ip =
+    typeof forwardedFor === "string"
+      ? forwardedFor
+      : Array.isArray(forwardedFor)
+      ? forwardedFor.join(", ")
+      : req.ip ?? null;
+
   const body =
     typeof req.body === "string"
       ? req.body
       : req.body
-        ? JSON.stringify(req.body)
+      ? JSON.stringify(req.body)
         : null;
 
   await recordCallback({
@@ -73,7 +81,7 @@ app.all("/xss/:nickname", async (req, res) => {
     type: "xss",
     path: req.path,
     method: req.method,
-    ip: req.ip ?? null,
+    ip,
     userAgent: req.get("user-agent") ?? null,
     headers: req.headers,
     query: req.query ?? {},
@@ -91,11 +99,19 @@ app.all("/:nickname.html", async (req, res) => {
     return;
   }
 
+  const forwardedFor = req.headers["x-forwarded-for"];
+  const ip =
+    typeof forwardedFor === "string"
+      ? forwardedFor
+      : Array.isArray(forwardedFor)
+      ? forwardedFor.join(", ")
+      : req.ip ?? null;
+
   const body =
     typeof req.body === "string"
       ? req.body
       : req.body
-        ? JSON.stringify(req.body)
+      ? JSON.stringify(req.body)
         : null;
 
   await recordCallback({
@@ -103,7 +119,7 @@ app.all("/:nickname.html", async (req, res) => {
     type: "csrf",
     path: req.path,
     method: req.method,
-    ip: req.ip ?? null,
+    ip,
     userAgent: req.get("user-agent") ?? null,
     headers: req.headers,
     query: req.query ?? {},
