@@ -13,6 +13,7 @@ export type MeResponse = {
 
 export type RegisterBody = {
   nickname: string;
+  password: string;
 };
 
 export type LoginBody = {
