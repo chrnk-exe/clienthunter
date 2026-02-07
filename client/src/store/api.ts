@@ -5,18 +5,21 @@ import type {
   PayloadCreateBody,
   PayloadCreateResponse,
   PayloadListResponse,
+  CallbackListResponse,
+  CallbackDetailResponse,
   RegisterBody,
   UpdateUserBody,
 } from "./types";
 
 const baseQuery = fetchBaseQuery({
-  baseUrl: "http://localhost:3000/api",
+  baseUrl: "/api",
   credentials: "include",
 });
 
 export const api = createApi({
   reducerPath: "api",
   baseQuery,
+  tagTypes: ["Callbacks"],
   endpoints: (builder) => ({
     getMe: builder.query<MeResponse, void>({
       query: () => "/users/me",
@@ -74,6 +77,20 @@ export const api = createApi({
         body,
       }),
     }),
+    listCallbacks: builder.query<CallbackListResponse, void>({
+      query: () => "/callbacks",
+      providesTags: ["Callbacks"],
+    }),
+    getCallback: builder.query<CallbackDetailResponse, number>({
+      query: (id) => `/callbacks/${id}`,
+    }),
+    deleteCallback: builder.mutation<{ ok: boolean }, number>({
+      query: (id) => ({
+        url: `/callbacks/${id}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: ["Callbacks"],
+    }),
   }),
 });
 
@@ -87,4 +104,8 @@ export const {
   useCreateCsrfPayloadMutation,
   useListXssPayloadsQuery,
   useCreateXssPayloadMutation,
+  useListCallbacksQuery,
+  useGetCallbackQuery,
+  useLazyGetCallbackQuery,
+  useDeleteCallbackMutation,
 } = api;

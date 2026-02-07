@@ -53,3 +53,27 @@ export type PayloadCreateBody = {
   payload: string;
   tag?: string;
 };
+
+export type CallbackRecord = {
+  id: number;
+  userId: string;
+  type: "xss" | "csrf";
+  path: string;
+  method: string;
+  ip: string | null;
+  userAgent: string | null;
+  headers?: Record<string, unknown>;
+  query?: Record<string, unknown>;
+  body?: string | null;
+  createdAt: string;
+};
+
+export type CallbackListResponse = {
+  ok: boolean;
+  items: CallbackRecord[];
+};
+
+export type CallbackDetailResponse = {
+  ok: boolean;
+  item: CallbackRecord;
+};

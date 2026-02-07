@@ -32,6 +32,16 @@ export async function ensureSchema(): Promise<void> {
   `);
 
   await query(`
+    CREATE TABLE IF NOT EXISTS csrf_payloads (
+      id bigserial PRIMARY KEY,
+      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      payload text NOT NULL,
+      tag text,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+
+  await query(`
     CREATE TABLE IF NOT EXISTS xss_payloads (
       id bigserial PRIMARY KEY,
       user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,

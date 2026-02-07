@@ -104,3 +104,20 @@ export async function clearCallbacks(userId: string): Promise<number> {
   const result = await query("DELETE FROM callbacks WHERE user_id = $1", [userId]);
   return result.rowCount ?? 0;
 }
+
+export async function getCallbackById(
+  userId: string,
+  id: number,
+): Promise<CallbackRecord | null> {
+  const result = await query<CallbackRow>(
+    `
+      SELECT id, user_id, type, path, method, ip, user_agent, headers, query, body, created_at
+      FROM callbacks
+      WHERE user_id = $1 AND id = $2
+      LIMIT 1
+    `,
+    [userId, id],
+  );
+  const row = result.rows[0];
+  return row ? mapCallback(row) : null;
+}

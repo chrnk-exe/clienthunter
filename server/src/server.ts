@@ -3,8 +3,9 @@ import express from "express";
 import type { Application, Request, Response } from "express";
 import apiRouter from "./routes/index.js";
 import { ensureSchema } from "./db/schema.js";
-import { getRouteOwner } from "./db/users.js";
+import { getUserByNickname } from "./db/users.js";
 import { recordCallback } from "./db/callbacks.js";
+import { getLatestCsrfPayloadByUser } from "./db/csrfPayloads.js";
 import swaggerJSDoc from "swagger-jsdoc";
 import swaggerUi from "swagger-ui-express";
 import cookieParser from "cookie-parser";
@@ -22,6 +23,10 @@ app.use(
     credentials: true,
   }),
 );
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.originalUrl}`);
+  next();
+});
 
 if (process.env.NODE_ENV !== "production") {
   const swaggerSpec = swaggerJSDoc({
@@ -48,15 +53,11 @@ if (process.env.NODE_ENV !== "production") {
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 }
 
-app.use(async (req, res, next) => {
-  if (req.path.startsWith("/api")) {
-    next();
-    return;
-  }
-
-  const match = await getRouteOwner(req.path);
-  if (!match) {
-    next();
+// GET XSS
+app.all("/xss/:nickname", async (req, res) => {
+  const user = await getUserByNickname(req.params.nickname);
+  if (!user) {
+    res.status(404).end();
     return;
   }
 
@@ -64,12 +65,12 @@ app.use(async (req, res, next) => {
     typeof req.body === "string"
       ? req.body
       : req.body
-      ? JSON.stringify(req.body)
-      : null;
+        ? JSON.stringify(req.body)
+        : null;
 
   await recordCallback({
-    userId: match.user.id,
-    type: match.type,
+    userId: user.id,
+    type: "xss",
     path: req.path,
     method: req.method,
     ip: req.ip ?? null,
@@ -79,12 +80,40 @@ app.use(async (req, res, next) => {
     body,
   });
 
-  if (match.type === "xss") {
-    res.status(204).end();
+  res.status(200).end();
+});
+
+// GET CSRF
+app.all("/:nickname.html", async (req, res) => {
+  const user = await getUserByNickname(req.params.nickname);
+  if (!user) {
+    res.status(404).end();
     return;
   }
 
-  res.status(200).type("text/html").send("<!doctype html><html><body>OK</body></html>");
+  const body =
+    typeof req.body === "string"
+      ? req.body
+      : req.body
+        ? JSON.stringify(req.body)
+        : null;
+
+  await recordCallback({
+    userId: user.id,
+    type: "csrf",
+    path: req.path,
+    method: req.method,
+    ip: req.ip ?? null,
+    userAgent: req.get("user-agent") ?? null,
+    headers: req.headers,
+    query: req.query ?? {},
+    body,
+  });
+
+  const latestPayload = await getLatestCsrfPayloadByUser(user.id);
+  const html =
+    latestPayload?.payload ?? "<!doctype html><html><body></body></html>";
+  res.status(200).type("text/html").send(html);
 });
 
 app.use("/api", apiRouter);

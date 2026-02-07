@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { addPayloadRecord, listPayloadRecords } from "../db/historyStore.js";
+import { createCsrfPayload, listCsrfPayloadsByUser } from "../db/csrfPayloads.js";
 import { requireAuth } from "../middlewares/auth.js";
 
 const router = Router();
@@ -16,8 +16,13 @@ const router = Router();
  *       200:
  *         description: Payload list
  */
-router.get("/", requireAuth, (req, res) => {
-  res.json({ ok: true, items: listPayloadRecords("csrf") });
+router.get("/", requireAuth, async (req, res) => {
+  if (!req.user) {
+    res.status(401).json({ ok: false, error: "unauthorized" });
+    return;
+  }
+  const items = await listCsrfPayloadsByUser(req.user.id);
+  res.json({ ok: true, items });
 });
 
 /**
@@ -44,7 +49,7 @@ router.get("/", requireAuth, (req, res) => {
  *       201:
  *         description: Created payload
  */
-router.post("/", requireAuth, (req, res) => {
+router.post("/", requireAuth, async (req, res) => {
   const { payload, tag } = req.body ?? {};
 
   if (typeof payload !== "string" || payload.length === 0) {
@@ -52,11 +57,15 @@ router.post("/", requireAuth, (req, res) => {
     return;
   }
 
-  const record = addPayloadRecord({
-    type: "csrf",
+  if (!req.user) {
+    res.status(401).json({ ok: false, error: "unauthorized" });
+    return;
+  }
+
+  const record = await createCsrfPayload({
+    userId: req.user.id,
     payload,
     tag: typeof tag === "string" ? tag : null,
-    userId: req.user?.nickname ?? null,
   });
 
   res.status(201).json({ ok: true, item: record });

