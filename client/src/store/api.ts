@@ -1,19 +1,17 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
-import type { LoginBody, MeResponse, RegisterBody } from "./types";
+import type {
+  LoginBody,
+  MeResponse,
+  PayloadCreateBody,
+  PayloadCreateResponse,
+  PayloadListResponse,
+  RegisterBody,
+  UpdateUserBody,
+} from "./types";
 
 const baseQuery = fetchBaseQuery({
-  baseUrl: "/api",
-  prepareHeaders: (headers) => {
-    const nickname = localStorage.getItem("nickname");
-    const token = localStorage.getItem("token");
-    if (nickname) {
-      headers.set("x-nickname", nickname);
-    }
-    if (token) {
-      headers.set("x-token", token);
-    }
-    return headers;
-  },
+  baseUrl: "http://localhost:3000/api",
+  credentials: "include",
 });
 
 export const api = createApi({
@@ -37,7 +35,56 @@ export const api = createApi({
         body,
       }),
     }),
+    logout: builder.mutation<{ ok: boolean }, void>({
+      query: () => ({
+        url: "/users/logout",
+        method: "POST",
+      }),
+    }),
+    updateUser: builder.mutation<MeResponse, UpdateUserBody>({
+      query: ({ nickname, ...body }) => ({
+        url: `/users/${nickname}`,
+        method: "PATCH",
+        body,
+      }),
+    }),
+    listCsrfPayloads: builder.query<PayloadListResponse, void>({
+      query: () => "/csrf-payloads",
+    }),
+    createCsrfPayload: builder.mutation<
+      PayloadCreateResponse,
+      PayloadCreateBody
+    >({
+      query: (body) => ({
+        url: "/csrf-payloads",
+        method: "POST",
+        body,
+      }),
+    }),
+    listXssPayloads: builder.query<PayloadListResponse, void>({
+      query: () => "/xss-payloads",
+    }),
+    createXssPayload: builder.mutation<
+      PayloadCreateResponse,
+      PayloadCreateBody
+    >({
+      query: (body) => ({
+        url: "/xss-payloads",
+        method: "POST",
+        body,
+      }),
+    }),
   }),
 });
 
-export const { useGetMeQuery, useRegisterMutation, useLoginMutation } = api;
+export const {
+  useGetMeQuery,
+  useRegisterMutation,
+  useLoginMutation,
+  useLogoutMutation,
+  useUpdateUserMutation,
+  useListCsrfPayloadsQuery,
+  useCreateCsrfPayloadMutation,
+  useListXssPayloadsQuery,
+  useCreateXssPayloadMutation,
+} = api;
